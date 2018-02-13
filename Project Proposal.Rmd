@@ -1,0 +1,56 @@
+---
+title: "Project Proposal - Data Science for Business"
+output:
+  html_document:
+    df_print: paged
+Author: Jayanth Mantri, Kelly Wess, Aishwarya Lakshmi Krishnan, Balazs Zoletnik
+always_allow_html: yes
+---
+# Team Information  
+**Project Title: Maximise ROI on Hollywood Movie Productions**    
+Names: Jayanth Mantri, Kelly Wess, Aishwarya Lakshmi Krishnan, Balazs Zoletnik  
+Section : AA  
+Date of Submission: 14 February 2018  
+
+#1 Purpose  
+By doing a regresson analysis, we want to predict the best predictors for maximising returns (profits as a percentage of investment) of a movie. 
+
+#2 Data Collection and Summary  
+This data set was found from Kaggle.  
+It has about 28 variables for 5043 movies, spanning across 100 years in 66 countries. There are 2399 unique director names, and thousands of actors/actresses.
+```{r}
+datafile_name = "tmdb_5000_movies.csv"
+ProjectData <- read.csv(datafile_name)
+ProjectData <- data.matrix(ProjectData) 
+ProjectData_INITIAL <- ProjectData
+
+```
+
+#3 List of Variables
+
+
+#4 Correlation Matrices
+
+#5 Analysis Steps
+
+**1. Data Preparation**  
+a. Combine 2 csv files  
+b. Clean the data - check for consistency, eliminate blanks/"NA"s  
+c. Evaluate the quality of the data available  
+d. Understand individual variables  
+
+
+**2 Data Analysis**  
+a. General Variable Summaries  
+b. Generate Correlation Matrices to understand number of independent variables
+
+
+
+
+
+
+
+```{r}
+
+```
+
