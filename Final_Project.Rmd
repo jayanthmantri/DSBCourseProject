@@ -1,0 +1,380 @@
+---
+title: "Final Project - Data Science for Business"
+output:
+  html_document:
+    df_print: paged
+Author: Jayanth Mantri, Kelly Wess, Aishwarya Lakshmi Krishnan, Balazs Zoletnik
+always_allow_html: yes
+---
+
+# Team Information  
+**Project Title: Maximise returns on Hollywood Movie Productions**    
+Names: Jayanth Mantri, Kelly Wess, Aishwarya Lakshmi Krishnan, Balazs Zoletnik  
+Section : AA  
+Date of Submission: 14 February 2018  
+
+#1 Purpose - Business Problem  
+
+The film industry invests a lot of money into producing and releasing movies but the success of a movie is uncertain until it is released. Our project aims to reduce this uncertainty by predicting the probability of success of a movie based on certain factors, such as:  
+1.	Genre  
+2.	Budget  
+3.	Runtime   
+4.	Title  
+5.	Release Date/Month
+6.	Run time  
+7.	Lead Actors  
+8.	Production House  
+
+Factors such as popularity, vote count and number of votes are listed in the database, but these cannot be used to predict the profitability of a movie (because the data is not available in time).
+
+The objective of our project is to predict the success of a movie in terms of total revenue and profit generated as a function of each of the above factors. This analysis we believe will help produce movies that have a good chance of success in terms of its profitability ratio. 
+
+#2 Data Collection and Summary  
+
+This data set was found from Kaggle. It has about 85 variables for each of the 4800 movies. 
+
+We cleaned the data as follows:
+1. Removed the white spaces in "text fields"
+2. Deleted entries movies without revenue/budget data
+3. Creating a variable called **"ProfitFactor"**, which is a binary variable (0/1) that indicates the attractiveness of the movie based on level of profits earned
+4. Created a variable called **"Proftiablity"**, which is a ratio of revenue and budget
+
+```{r}
+pacman::p_load("caret","partykit","ROCR","lift","rpart","e1071", "lubridate")
+
+suppressWarnings(source("library.R"))
+# Package options
+suppressWarnings(ggthemr('fresh'))  # ggplot theme
+opts_knit$set(progress=FALSE, verbose=FALSE)
+opts_chunk$set(echo=FALSE, fig.align="center", fig.width=10, fig.height=6.35, results="asis")
+options(knitr.kable.NA = '')
+
+
+datafile_name = "MovieDatabase.csv"
+ProjectData <- read.csv(datafile_name)
+ProjectData_INITIAL <- ProjectData
+
+#removing entries that have budget field as empty
+ProjectData_INITIAL2 <- ProjectData_INITIAL[ProjectData_INITIAL[,2]!=0,]
+#removing entries that have revenue field as empty
+ProjectData_INITIAL3 <- ProjectData_INITIAL2[ProjectData_INITIAL2[,3]!=0,]
+
+#defining profitability
+ProjectData_INITIAL3$Profitability <-(ProjectData_INITIAL3$revenue / ProjectData_INITIAL3$budget)
+
+#classifying variables
+ProjectData_INITIAL3$release_date <- as.Date(ProjectData_INITIAL3$release_date)
+ProjectData_INITIAL3$ProfitFactor <-as.factor(ProjectData_INITIAL3$ProfitFactor)
+
+#defining month and year of movie, from "release date"
+ProjectData_INITIAL3$Month_of_release <- month(ProjectData_INITIAL3$release_date)
+#Some months weren't readble from data, so we use "0"" to define those months
+ProjectData_INITIAL3$Month_of_release[is.na(ProjectData_INITIAL3$Month_of_release)] <- 0 
+ProjectData_INITIAL3$Year_of_release <- day(ProjectData_INITIAL3$release_date)
+#Some years weren't readble from data, so we use "0"" to define those years
+ProjectData_INITIAL3$Year_of_release[is.na(ProjectData_INITIAL3$Year_of_release)] <- 0 
+
+#classifying variables
+#ProjectData_INITIAL3$Month_of_release <-as.factor(ProjectData_INITIAL3$Month_of_release)
+#ProjectData_INITIAL3$Year_of_release <-as.factor(ProjectData_INITIAL3$Year_of_release)
+
+
+```
+
+#Adding new variables in R
+
+1. We created dummy variables for Keywords, Actors and Genres
+2. Based on their importance and frequency, we chose to use **top 20 Actors** and **all Genres** for our modeling
+
+```{r}
+#Adding new columns with unique Keywords
+library(tidyverse)
+movies <- ProjectData_INITIAL3
+
+movies_tall <- movies %>% 
+  gather(keyword_col, keyword_name, starts_with("keyword")) %>%
+  select(-keyword_col) %>%
+  unique() %>%
+  mutate(keyword_present = 1)
+
+unique_keywords <- movies_tall %>%
+  group_by(keyword_name) %>%
+  summarise(keyword_occurrences = n())
+
+random_20_keywords <- sample_n(unique_keywords, 20)$keyword_name
+
+movies_tall_random_20_kw <- movies_tall %>% 
+  mutate(keyword_name =  if_else((keyword_name %in% random_20_keywords), keyword_name, "other")) %>%
+  unique()
+
+movies_wide <- movies_tall_random_20_kw %>%
+  spread(keyword_name, keyword_present, fill = 0, sep = "_")
+
+#Adding new columns with unique Actors
+movies_tall <- movies_wide %>% 
+  gather(actor_col, actor_name, starts_with("Actor")) %>%
+  select(-actor_col) %>%
+  unique() %>%
+  mutate(actor_present = 1)
+
+unique_actors <- movies_tall %>%
+  group_by(actor_name) %>%
+  summarise(actor_occurrences = n())
+
+random_1000_actors <- sample_n(unique_actors, 8973)$actor_name
+
+movies_tall_random_1000_actors <- movies_tall %>% 
+  mutate(actor_name =  if_else((actor_name %in% random_1000_actors), actor_name, "other")) %>%
+  unique()
+
+movies_wide2 <- movies_tall_random_1000_actors %>%
+  spread(actor_name, actor_present, fill = 0, sep = "_")
+
+#Adding new columns with unique Genres
+movies_tall <- movies_wide2 %>% 
+  gather(Genre_col, Genre_name, starts_with("Genre")) %>%
+  select(-Genre_col) %>%
+  unique() %>%
+  mutate(Genre_present = 1)
+
+unique_Genre <- movies_tall %>%
+  group_by(Genre_name) %>%
+  summarise(Genre_occurrences = n())
+
+random_33_genres <- sample_n(unique_Genre, 20)$Genre_name
+
+movies_tall_genres <- movies_tall %>% 
+  mutate(Genre_name =  if_else((Genre_name %in% random_33_genres), Genre_name, "other")) %>%
+  unique()
+
+ProjectData_FINAL <- movies_tall_genres %>%
+  spread(Genre_name, Genre_present, fill = 0, sep = "_")
+
+```
+
+
+#Create Training and Testing Data
+
+```{r}
+#creating training and testing data
+set.seed(77850) #set a random number generation seed to ensure that the split is the same everytime
+#install.packages("caret")
+library(caret)
+ProjectData_FINAL$ProfitFactor <- as.factor(ProjectData_FINAL$ProfitFactor)
+inTrain <- createDataPartition(y = ProjectData_FINAL$ProfitFactor,p = 0.75, list = FALSE)
+training <- ProjectData_FINAL[ inTrain,]
+testing <- ProjectData_FINAL[ -inTrain,]
+```
+
+
+```{r}
+#XG Boost
+#install.packages("xgboost")
+library(xgboost)
+# Package loading
+require(xgboost)
+require(Matrix)
+require(data.table)
+if (!require("vcd")) install.packages("vcd")
+
+# Preparing data for xgboost and running the model
+sparse_matrix <- sparse.model.matrix(ProfitFactor ~ budget+runtime+actor_name_JohnnyDepp+actor_name_NicolasCage+actor_name_DenzelWashington+actor_name_ArnoldSchwarzenegger+actor_name_Himself+actor_name_TomCruise+actor_name_TomHanks+actor_name_GeorgeClooney+actor_name_MattDamon+actor_name_SylvesterStallone+actor_name_AdamSandler+actor_name_BenStiller+actor_name_JimCarrey+actor_name_HarrisonFord+actor_name_MarkWahlberg+actor_name_BenAffleck+actor_name_EddieMurphy+actor_name_JohnTravolta+actor_name_BradPitt+Genre_name_Drama+Genre_name_Comedy+Genre_name_Action+Genre_name_Romance+Genre_name_Crime+Genre_name_Adventure+Genre_name_Family+Genre_name_ScienceFiction+Genre_name_Mystery+Genre_name_Fantasy+Genre_name_Horror+Genre_name_History+Genre_name_Thriller+Genre_name_War , data = training)
+head(sparse_matrix)
+output_vector = training[,"ProfitFactor"] == 1
+model_xgboost <- xgboost(data = sparse_matrix, label = output_vector
+                         ,eta = 0.3, max_depth = 10, nrounds = 1500, objective ="binary:logistic", verbose = 0)
+
+# Visualize what variables are important to predict churn
+importance <- xgb.importance(feature_names = colnames(sparse_matrix), model = model_xgboost)
+importance
+xgb.plot.importance(importance_matrix = importance)
+```
+
+
+
+#Logistic Regression 
+
+```{r}
+pacman::p_load("caret","partykit","ROCR","lift","rpart","e1071", "lubridate")
+options(warn=-1)
+# GLM Logistic Regression
+model_logistic<-glm(ProfitFactor~ budget+runtime+Month_of_release+Year_of_release+actor_name_RobertDeNiro+actor_name_JohnnyDepp+actor_name_NicolasCage+actor_name_DenzelWashington+actor_name_ArnoldSchwarzenegger+actor_name_Himself+actor_name_TomCruise+actor_name_TomHanks+actor_name_GeorgeClooney+actor_name_MattDamon+actor_name_SylvesterStallone+actor_name_AdamSandler+actor_name_BenStiller+actor_name_JimCarrey+actor_name_HarrisonFord+actor_name_MarkWahlberg+actor_name_BenAffleck+actor_name_EddieMurphy+actor_name_JohnTravolta+actor_name_BradPitt+Genre_name_Drama+Genre_name_Comedy+Genre_name_Action+Genre_name_Romance+Genre_name_Crime+Genre_name_Adventure+Genre_name_Family+Genre_name_ScienceFiction+Genre_name_Mystery+Genre_name_Fantasy+Genre_name_Horror+Genre_name_History+Genre_name_Thriller+Genre_name_War, data = training, family="binomial"(link="logit"))
+
+summary(model_logistic)
+```
+
+```{r}
+#Finding predicitons on Testing set
+logistic_pred_testing<-rep("1",nrow(testing))
+logistic_probabilities_testing<-predict(model_logistic,newdata=testing,type="response") #Predict probabilities
+logistic_pred_testing[as.numeric(logistic_probabilities_testing)<0.755]="0" #Predict classification. Why 0.755? - that's the average probability of a movie being succesful
+confusionMatrix(logistic_pred_testing,testing$ProfitFactor) #Display confusion matrix
+#OC Curve
+logistic_ROC_pred <- prediction(logistic_probabilities_testing, testing$ProfitFactor)
+logistic_ROC_testing <- performance(logistic_ROC_pred,"tpr","fpr") #Create ROC curve data
+plot(logistic_ROC_testing) #Plot ROC curve
+```
+
+
+```{r}
+####AUC (area under curve)
+auc.tmp <- performance(logistic_ROC_pred,"auc") #Create AUC data
+logistic_auc_testing <- as.numeric(auc.tmp@y.values) #Calculate AUC
+logistic_auc_testing #Display AUC value: 90+% - excellent, 80-90% - very good, 70-80% - good, 60-70% - so so, below 60% - not much value
+
+#### Lift chart
+plotLift(logistic_probabilities_testing, testing$ProfitFactor, cumulative = TRUE, n.buckets = 10) # Plot Lift chart
+
+```
+
+```{r}
+#Stepwise AIC Model
+library(MASS)
+model_logistic_stepwiseAIC<-stepAIC(model_logistic,direction = c("both"),trace = 1) #AIC stepwise
+summary(model_logistic_stepwiseAIC)
+```
+
+```{r}
+par(mfrow=c(1,4))
+plot(model_logistic_stepwiseAIC) #Error plots: similar nature to lm plots
+par(mfrow=c(1,1))
+model_logistic_FINAL<-model_logistic_stepwiseAIC #Final model
+#Finding predicitons on Testing set
+logistic_pred_testing<-rep("1",nrow(testing))
+logistic_probabilities_testing<-predict(model_logistic_FINAL,newdata=testing,type="response") #Predict probabilities
+logistic_pred_testing[as.numeric(logistic_probabilities_testing)<0.755]="0" #Predict classification. Why 0.755? - that's the average probability of a movie being succesful
+confusionMatrix(logistic_pred_testing,testing$ProfitFactor) #Display confusion matrix
+#OC Curve
+logistic_ROC_pred <- prediction(logistic_probabilities_testing, testing$ProfitFactor)
+logistic_ROC_testing <- performance(logistic_ROC_pred,"tpr","fpr") #Create ROC curve data
+plot(logistic_ROC_testing) #Plot ROC curve
+
+####AUC (area under curve)
+auc.tmp <- performance(logistic_ROC_pred,"auc") #Create AUC data
+logistic_auc_testing <- as.numeric(auc.tmp@y.values) #Calculate AUC
+logistic_auc_testing #Display AUC value: 90+% - excellent, 80-90% - very good, 70-80% - good, 60-70% - so so, below 60% - not much value
+```
+```{r}
+#### Lift chart
+plotLift(logistic_probabilities_testing, testing$ProfitFactor, cumulative = TRUE, n.buckets = 10) # Plot Lift chart
+```
+
+# CTREE Regression
+```{r}
+ctree_tree<-ctree(ProfitFactor~ budget+runtime+Month_of_release+Year_of_release+actor_name_RobertDeNiro+actor_name_JohnnyDepp+actor_name_NicolasCage+actor_name_DenzelWashington+actor_name_ArnoldSchwarzenegger+actor_name_Himself+actor_name_TomCruise+actor_name_TomHanks+actor_name_GeorgeClooney+actor_name_MattDamon+actor_name_SylvesterStallone+actor_name_AdamSandler+actor_name_BenStiller+actor_name_JimCarrey+actor_name_HarrisonFord+actor_name_MarkWahlberg+actor_name_BenAffleck+actor_name_EddieMurphy+actor_name_JohnTravolta+actor_name_BradPitt+Genre_name_Drama+Genre_name_Comedy+Genre_name_Action+Genre_name_Romance+Genre_name_Crime+Genre_name_Adventure+Genre_name_Family+Genre_name_ScienceFiction+Genre_name_Mystery+Genre_name_Fantasy+Genre_name_Horror+Genre_name_History+Genre_name_Thriller+Genre_name_War, data = training) 
+
+#Run ctree on training data
+plot(ctree_tree, gp = gpar(fontsize = 8)) #Plotting the tree (adjust fontsize if needed)
+
+ctree_prediction<-predict(ctree_tree,newdata=testing, type="response") #Predict classification (for confusion matrix); default with ctree
+
+confusionMatrix(ctree_prediction,testing$ProfitFactor) #Display confusion matrix
+```
+
+```{r}
+####ROC Curve
+ctree_probabilities_testing <-predict(ctree_tree,newdata=testing,type = "prob") #Predict probabilities
+ctree_pred_testing <- prediction(ctree_probabilities_testing[,2], testing$ProfitFactor ) #Calculate errors
+ctree_ROC_testing <- performance(ctree_pred_testing,"tpr","fpr") #Create ROC curve data
+plot(ctree_ROC_testing) #Plot ROC curve
+```
+####AUC (area under curve)
+```{r}
+auc.tmp <- performance(ctree_pred_testing,"auc") #Create AUC data
+ctree_auc_testing <- as.numeric(auc.tmp@y.values) #Calculate AUC
+ctree_auc_testing #Display AUC value: 90+% - excellent, 80-90% - very good, 70-80% - good, 60-70% - so so, below 60% - not much value
+
+#### Lift chart
+plotLift(ctree_prediction,  testing$ProfitFactor, cumulative = TRUE, n.buckets = 10) # Plot Lift chart
+
+```
+#Lasso Regression
+```{r}
+library(glmnet)
+#convert training data to matrix format
+x <- model.matrix(ProfitFactor~budget+runtime+actor_name_RobertDeNiro+actor_name_JohnnyDepp+actor_name_NicolasCage+actor_name_DenzelWashington+actor_name_ArnoldSchwarzenegger+actor_name_Himself+actor_name_TomCruise+actor_name_TomHanks+actor_name_GeorgeClooney+actor_name_MattDamon+actor_name_SylvesterStallone+actor_name_AdamSandler+actor_name_BenStiller+actor_name_JimCarrey+actor_name_HarrisonFord+actor_name_MarkWahlberg+actor_name_BenAffleck+actor_name_EddieMurphy+actor_name_JohnTravolta+actor_name_BradPitt+Genre_name_Drama+Genre_name_Comedy+Genre_name_Action+Genre_name_Romance+Genre_name_Crime+Genre_name_Adventure+Genre_name_Family+Genre_name_ScienceFiction+Genre_name_Mystery+Genre_name_Fantasy+Genre_name_Horror+Genre_name_History+Genre_name_Thriller+Genre_name_War,training)
+#convert class to numerical variable
+y <- training$ProfitFactor
+#perform grid search to find optimal value of lambda
+#family= binomial => logistic regression, alpha=1 => lasso
+# check docs to explore other type.measure options
+cv.out <- cv.glmnet(x,y,alpha=1,family="binomial",type.measure ="mse")
+#plot result
+plot(cv.out)
+lambda_1se <-log(cv.out$lambda.1se)
+```
+
+```{r}
+#get test data
+x_test <- model.matrix(ProfitFactor~budget+runtime+actor_name_RobertDeNiro+actor_name_RobertDeNiro+actor_name_JohnnyDepp+actor_name_NicolasCage+actor_name_DenzelWashington+actor_name_ArnoldSchwarzenegger+actor_name_Himself+actor_name_TomCruise+actor_name_TomHanks+actor_name_GeorgeClooney+actor_name_MattDamon+actor_name_SylvesterStallone+actor_name_AdamSandler+actor_name_BenStiller+actor_name_JimCarrey+actor_name_HarrisonFord+actor_name_MarkWahlberg+actor_name_BenAffleck+actor_name_EddieMurphy+actor_name_JohnTravolta+actor_name_BradPitt+Genre_name_Drama+Genre_name_Comedy+Genre_name_Action+Genre_name_Romance+Genre_name_Crime+Genre_name_Adventure+Genre_name_Family+Genre_name_ScienceFiction+Genre_name_Mystery+Genre_name_Fantasy+Genre_name_Horror+Genre_name_History+Genre_name_Thriller+Genre_name_War,testing)
+#predict class, type=???class???
+lasso_prob <- predict(cv.out,newx = x_test,s=lambda_1se,type="response")
+#translate probabilities to predictions
+lasso_predict <- rep(0,nrow(testing))
+lasso_predict[lasso_prob>.755] <- 1
+#confusion matrix
+table(pred=lasso_predict,true=testing$ProfitFactor)
+confusionMatrix(lasso_predict,testing$ProfitFactor)
+
+```
+
+#Linear regression to predict revenues
+
+```{r}
+#Estimating actual Revenues - linear regression GLM
+suppressWarnings(source("library.R"))
+pacman::p_load("caret","partykit","ROCR","lift","rpart","e1071", "lubridate")
+
+model_logistic<-glm(revenue ~ budget+Month_of_release+Year_of_release+runtime+actor_name_RobertDeNiro+actor_name_JohnnyDepp+actor_name_NicolasCage+actor_name_DenzelWashington+actor_name_ArnoldSchwarzenegger+actor_name_Himself+actor_name_TomCruise+actor_name_TomHanks+actor_name_GeorgeClooney+actor_name_MattDamon+actor_name_SylvesterStallone+actor_name_AdamSandler+actor_name_BenStiller+actor_name_JimCarrey+actor_name_HarrisonFord+actor_name_MarkWahlberg+actor_name_BenAffleck+actor_name_EddieMurphy+actor_name_JohnTravolta+actor_name_BradPitt+Genre_name_Drama+Genre_name_Comedy+Genre_name_Action+Genre_name_Romance+Genre_name_Crime+Genre_name_Adventure+Genre_name_Family+Genre_name_ScienceFiction+Genre_name_Mystery+Genre_name_Fantasy+Genre_name_Horror+Genre_name_History+Genre_name_Thriller+Genre_name_War, data = training)
+summary(model_logistic)
+model_logistic_prediction<-predict(model_logistic, testing) 
+percent.errors <- abs(testing$revenue-model_logistic_prediction)/testing$revenue*100 #calculate absolute percentage errors
+mean(percent.errors) #display Mean Absolute Percentage Error (MAPE)
+
+#Estimating actual Revenues - linear regression Stepwise AIC
+
+model_logistic_stepwiseAIC<-stepAIC(model_logistic,direction = c("both"),trace = 1) #AIC stepwise
+summary(model_logistic_stepwiseAIC)
+
+model_logistic_prediction<-predict(model_logistic_stepwiseAIC, testing) 
+
+percent.errors <- abs(testing$revenue-model_logistic_prediction)/testing$revenue*100 #calculate absolute percentage errors
+mean(percent.errors) #display Mean Absolute Percentage Error (MAPE)
+
+#Estimating actual Revenues - CTREE
+
+
+# CTREE Regression
+
+ctree_tree<-ctree(revenue ~budget+runtime+actor_name_RobertDeNiro+actor_name_JohnnyDepp+actor_name_NicolasCage+actor_name_DenzelWashington+actor_name_ArnoldSchwarzenegger+actor_name_Himself+actor_name_TomCruise+actor_name_TomHanks+actor_name_GeorgeClooney+actor_name_MattDamon+actor_name_SylvesterStallone+actor_name_AdamSandler+actor_name_BenStiller+actor_name_JimCarrey+actor_name_HarrisonFord+actor_name_MarkWahlberg+actor_name_BenAffleck+actor_name_EddieMurphy+actor_name_JohnTravolta+actor_name_BradPitt+Genre_name_Drama+Genre_name_Comedy+Genre_name_Action+Genre_name_Romance+Genre_name_Crime+Genre_name_Adventure+Genre_name_Family+Genre_name_ScienceFiction+Genre_name_Mystery+Genre_name_Fantasy+Genre_name_Horror+Genre_name_History+Genre_name_Thriller+Genre_name_War, data=training) #Run ctree on training data
+plot(ctree_tree, gp = gpar(fontsize = 8)) #Plotting the tree (adjust fontsize if needed)
+
+ctree_prediction<-predict(ctree_tree,newdata=testing, type="response") #Predict classification (for confusion matrix); default with ctree
+
+
+
+#Lasso Regression
+
+library(glmnet)
+#convert training data to matrix format
+x <- model.matrix(revenue~budget+Year_of_release+Month_of_release+runtime+actor_name_RobertDeNiro+actor_name_JohnnyDepp+actor_name_NicolasCage+actor_name_DenzelWashington+actor_name_ArnoldSchwarzenegger+actor_name_Himself+actor_name_TomCruise+actor_name_TomHanks+actor_name_GeorgeClooney+actor_name_MattDamon+actor_name_SylvesterStallone+actor_name_AdamSandler+actor_name_BenStiller+actor_name_JimCarrey+actor_name_HarrisonFord+actor_name_MarkWahlberg+actor_name_BenAffleck+actor_name_EddieMurphy+actor_name_JohnTravolta+actor_name_BradPitt+Genre_name_Drama+Genre_name_Comedy+Genre_name_Action+Genre_name_Romance+Genre_name_Crime+Genre_name_Adventure+Genre_name_Family+Genre_name_ScienceFiction+Genre_name_Mystery+Genre_name_Fantasy+Genre_name_Horror+Genre_name_History+Genre_name_Thriller+Genre_name_War,training)
+#convert class to numerical variable
+y <- training$ProfitFactor
+#perform grid search to find optimal value of lambda
+#family= binomial => logistic regression, alpha=1 => lasso
+# check docs to explore other type.measure options
+cv.out <- cv.glmnet(x,y,alpha=1,family="multinomial", type.measure ="mse")
+#plot result
+plot(cv.out)
+lambda_1se <-log(cv.out$lambda.1se)
+
+#get test data
+x_test <- model.matrix(revenue~budget++Year_of_release+Month_of_release+runtime+actor_name_RobertDeNiro+actor_name_RobertDeNiro+actor_name_JohnnyDepp+actor_name_NicolasCage+actor_name_DenzelWashington+actor_name_ArnoldSchwarzenegger+actor_name_Himself+actor_name_TomCruise+actor_name_TomHanks+actor_name_GeorgeClooney+actor_name_MattDamon+actor_name_SylvesterStallone+actor_name_AdamSandler+actor_name_BenStiller+actor_name_JimCarrey+actor_name_HarrisonFord+actor_name_MarkWahlberg+actor_name_BenAffleck+actor_name_EddieMurphy+actor_name_JohnTravolta+actor_name_BradPitt+Genre_name_Drama+Genre_name_Comedy+Genre_name_Action+Genre_name_Romance+Genre_name_Crime+Genre_name_Adventure+Genre_name_Family+Genre_name_ScienceFiction+Genre_name_Mystery+Genre_name_Fantasy+Genre_name_Horror+Genre_name_History+Genre_name_Thriller+Genre_name_War,testing)
+#predict class, type=???class???
+lasso_prob <- predict(cv.out,newx = x_test,s=lambda_1se,type="response")
+#translate probabilities to predictions
+lasso_predict <- rep(0,nrow(testing))
+lasso_predict[lasso_prob>.755] <- 1
+
+```
+
